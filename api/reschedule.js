@@ -1,14 +1,3 @@
-/**
- * POST /api/reschedule
- *
- * Body:
- * {
- *   "notificationToken": "...",
- *   "newDate": "25/09/2026 13:37",
- *   "shopName": "สาขาสยาม"
- * }
- */
-
 async function getMiniAppChannelAccessToken() {
   const channelId =
     process.env.LINE_MINIAPP_CHANNEL_ID;
@@ -57,33 +46,12 @@ async function getMiniAppChannelAccessToken() {
     await response.json();
 
   if (!response.ok) {
-    console.error(
-      'LINE OAuth Error:',
-      {
-        status:
-          response.status,
-
-        data,
-      }
-    );
-
     throw new Error(
       data?.error_description ||
         data?.message ||
         'LINE OAuth failed'
     );
   }
-
-  console.log(
-    'LINE MINI App OAuth success:',
-    {
-      tokenType:
-        data.token_type,
-
-      expiresIn:
-        data.expires_in,
-    }
-  );
 
   return data.access_token;
 }
@@ -114,20 +82,6 @@ async function verifyChannelAccessToken(
   const data =
     await response.json();
 
-  console.log(
-    'LINE Token Verify:',
-    {
-      status:
-        response.status,
-
-      clientId:
-        data?.client_id,
-
-      expiresIn:
-        data?.expires_in,
-    }
-  );
-
   if (!response.ok) {
     throw new Error(
       data?.error ||
@@ -140,78 +94,36 @@ async function verifyChannelAccessToken(
 }
 
 
-async function sendServiceMessage({
-  accessToken,
-  notificationToken,
-  newDate,
-  shopName,
+async function issueServiceNotificationToken({
+  channelAccessToken,
+  liffAccessToken,
 }) {
-  const url =
-    'https://api.line.me/message/v3/notifier/send?target=service';
+  if (!liffAccessToken) {
+    throw new Error(
+      'Missing LIFF access token'
+    );
+  }
 
-  const requestBody = {
-    templateName:
-      'accepted_reminder_d_th',
-
-    notificationToken,
-
-    params: {
-      date_time:
-        newDate,
-
-      shop_name:
-        shopName ||
-        'สาขาหลัก',
-
-      btn1_url:
-        'https://miniapp.line.me/2011612068-jTYoURfr',
-
-      btn2_url:
-        'https://line.me',
-    },
-  };
-
-  console.log(
-    'Sending LINE Service Message:',
+  const response = await fetch(
+    'https://api.line.me/message/v3/notifier/token',
     {
-      templateName:
-        requestBody.templateName,
+      method: 'POST',
 
-      notificationTokenExists:
-        Boolean(
-          requestBody.notificationToken
-        ),
+      headers: {
+        'Content-Type':
+          'application/json',
 
-      dateTime:
-        newDate,
+        Authorization:
+          `Bearer ${channelAccessToken}`,
+      },
 
-      shopName:
-        shopName ||
-        'สาขาหลัก',
+      body: JSON.stringify({
+        liffAccessToken,
+      }),
+
+      cache: 'no-store',
     }
   );
-
-  const response =
-    await fetch(
-      url,
-      {
-        method: 'POST',
-
-        headers: {
-          'Content-Type':
-            'application/json',
-
-          Authorization:
-            `Bearer ${accessToken}`,
-        },
-
-        body: JSON.stringify(
-          requestBody
-        ),
-
-        cache: 'no-store',
-      }
-    );
 
   const text =
     await response.text();
@@ -219,8 +131,114 @@ async function sendServiceMessage({
   let result;
 
   try {
-    result =
-      JSON.parse(text);
+    result = JSON.parse(text);
+  } catch {
+    result = {
+      raw: text,
+    };
+  }
+
+  console.log(
+    'LINE Issue Notification Token:',
+    {
+      status:
+        response.status,
+
+      success:
+        response.ok,
+
+      hasNotificationToken:
+        Boolean(
+          result?.notificationToken
+        ),
+
+      expiresIn:
+        result?.expiresIn,
+
+      remainingCount:
+        result?.remainingCount,
+
+      sessionId:
+        result?.sessionId,
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      result?.message ||
+        result?.error ||
+        'Failed to issue notification token'
+    );
+  }
+
+  if (!result?.notificationToken) {
+    throw new Error(
+      'notificationToken was not returned'
+    );
+  }
+
+  return result;
+}
+
+
+async function sendServiceMessage({
+  channelAccessToken,
+  notificationToken,
+  newDate,
+  shopName,
+}) {
+  if (!notificationToken) {
+    throw new Error(
+      'Missing service notification token'
+    );
+  }
+
+  const response = await fetch(
+    'https://api.line.me/message/v3/notifier/send?target=service',
+    {
+      method: 'POST',
+
+      headers: {
+        'Content-Type':
+          'application/json',
+
+        Authorization:
+          `Bearer ${channelAccessToken}`,
+      },
+
+      body: JSON.stringify({
+        templateName:
+          'accepted_reminder_d_th',
+
+        notificationToken,
+
+        params: {
+          date_time:
+            newDate,
+
+          shop_name:
+            shopName ||
+            'สาขาหลัก',
+
+          btn1_url:
+            'https://miniapp.line.me/2011612068-jTYoURfr',
+
+          btn2_url:
+            'https://line.me',
+        },
+      }),
+
+      cache: 'no-store',
+    }
+  );
+
+  const text =
+    await response.text();
+
+  let result;
+
+  try {
+    result = JSON.parse(text);
   } catch {
     result = {
       raw: text,
@@ -233,16 +251,29 @@ async function sendServiceMessage({
       status:
         response.status,
 
-      statusText:
-        response.statusText,
+      success:
+        response.ok,
 
-      result,
+      hasNewNotificationToken:
+        Boolean(
+          result?.notificationToken
+        ),
+
+      expiresIn:
+        result?.expiresIn,
+
+      remainingCount:
+        result?.remainingCount,
+
+      sessionId:
+        result?.sessionId,
     }
   );
 
   if (!response.ok) {
     throw new Error(
       result?.message ||
+        result?.error ||
         'LINE Service Message failed'
     );
   }
@@ -255,138 +286,79 @@ export default async function handler(
   req,
   res
 ) {
-  // ==========================================================
-  // OPTIONS
-  // ==========================================================
-
   if (req.method === 'OPTIONS') {
-    res.setHeader(
-      'Access-Control-Allow-Origin',
-      '*'
-    );
-
-    res.setHeader(
-      'Access-Control-Allow-Methods',
-      'POST, OPTIONS'
-    );
-
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Content-Type'
-    );
-
-    return res
-      .status(200)
-      .end();
+    return res.status(200).end();
   }
-
-
-  // ==========================================================
-  // METHOD
-  // ==========================================================
 
   if (req.method !== 'POST') {
-    return res
-      .status(405)
-      .json({
-        success: false,
-        message:
-          'Method Not Allowed',
-      });
+    return res.status(405).json({
+      success: false,
+      error:
+        'Method Not Allowed',
+    });
   }
 
-
   try {
-    // ========================================================
-    // ENV CHECK
-    // ========================================================
-
-    console.log(
-      'LINE Environment:',
-      {
-        hasMiniAppChannelId:
-          Boolean(
-            process.env
-              .LINE_MINIAPP_CHANNEL_ID
-          ),
-
-        hasMiniAppChannelSecret:
-          Boolean(
-            process.env
-              .LINE_MINIAPP_CHANNEL_SECRET
-          ),
-      }
-    );
-
-
-    // ========================================================
-    // REQUEST
-    // ========================================================
-
     const {
-      notificationToken,
-      userId,
+      liffAccessToken,
       newDate,
       shopName,
-    } =
-      req.body || {};
+    } = req.body || {};
 
+    // --------------------------------------------------------
+    // Validate
+    // --------------------------------------------------------
 
-    // ========================================================
-    // TARGET TOKEN
-    // ========================================================
-
-    const targetToken =
-      notificationToken ||
-      userId;
-
-
-    // ========================================================
-    // VALIDATION
-    // ========================================================
-
-    if (!targetToken) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error:
-            'Missing notificationToken',
-        });
+    if (!liffAccessToken) {
+      return res.status(400).json({
+        success: false,
+        error:
+          'Missing liffAccessToken',
+      });
     }
 
     if (!newDate) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error:
-            'Missing newDate',
-        });
+      return res.status(400).json({
+        success: false,
+        error:
+          'Missing newDate',
+      });
     }
 
+    // --------------------------------------------------------
+    // 1. Get Channel Access Token
+    // --------------------------------------------------------
 
-    // ========================================================
-    // GET MINI APP CHANNEL TOKEN
-    // ========================================================
-
-    const accessToken =
+    const channelAccessToken =
       await getMiniAppChannelAccessToken();
 
+    console.log(
+      'LINE MINI App OAuth success'
+    );
 
-    // ========================================================
-    // VERIFY TOKEN
-    // ========================================================
+    // --------------------------------------------------------
+    // 2. Verify Channel Access Token
+    // --------------------------------------------------------
 
     const tokenInfo =
       await verifyChannelAccessToken(
-        accessToken
+        channelAccessToken
       );
 
+    console.log(
+      'LINE Token Verify:',
+      {
+        clientId:
+          tokenInfo.client_id,
 
-    // ========================================================
-    // CHECK CHANNEL ID
-    // ========================================================
+        expiresIn:
+          tokenInfo.expires_in,
+      }
+    );
+
+    // --------------------------------------------------------
+    // 3. Verify channel ID
+    // --------------------------------------------------------
 
     const configuredChannelId =
       process.env
@@ -397,41 +369,66 @@ export default async function handler(
       configuredChannelId
     ) {
       throw new Error(
-        'LINE token belongs to a different channel'
+        'Channel access token belongs to another channel'
       );
     }
 
+    // --------------------------------------------------------
+    // 4. Issue Service Notification Token
+    // --------------------------------------------------------
 
-    // ========================================================
-    // SEND
-    // ========================================================
+    const notification =
+      await issueServiceNotificationToken({
+        channelAccessToken,
+
+        liffAccessToken,
+      });
+
+    // --------------------------------------------------------
+    // 5. Send Service Message
+    // --------------------------------------------------------
 
     const result =
       await sendServiceMessage({
-        accessToken,
+        channelAccessToken,
 
         notificationToken:
-          targetToken,
+          notification.notificationToken,
 
         newDate,
 
         shopName,
       });
 
+    // --------------------------------------------------------
+    // 6. IMPORTANT
+    // --------------------------------------------------------
+    //
+    // result.notificationToken
+    // ต้องเอาไปเก็บ DB
+    //
+    // อย่าใช้ notification.notificationToken
+    // สำหรับครั้งถัดไป
+    //
+    // --------------------------------------------------------
 
-    // ========================================================
-    // SUCCESS
-    // ========================================================
+    return res.status(200).json({
+      success: true,
 
-    return res
-      .status(200)
-      .json({
-        success: true,
+      data: {
+        notificationToken:
+          result.notificationToken,
 
-        data:
-          result,
-      });
+        expiresIn:
+          result.expiresIn,
 
+        remainingCount:
+          result.remainingCount,
+
+        sessionId:
+          result.sessionId,
+      },
+    });
 
   } catch (error) {
     console.error(
@@ -439,18 +436,13 @@ export default async function handler(
       error
     );
 
-    const message =
-      error instanceof Error
-        ? error.message
-        : 'Unknown error';
+    return res.status(500).json({
+      success: false,
 
-    return res
-      .status(500)
-      .json({
-        success: false,
-
-        error:
-          message,
-      });
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Unknown error',
+    });
   }
 }
