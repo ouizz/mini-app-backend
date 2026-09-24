@@ -1,31 +1,31 @@
 /**
- * LINE Service Message API
- *
- * POST /api/line/send-service-message
+ * POST /api/reschedule
  *
  * Body:
  * {
- *   "userId": "Uxxxxxxxxxxxx",
- *   "notificationToken": "xxxxxxxxxxxx",
- *   "newDate": "28/09/2026 10:00",
- *   "shopName": "สาขาหลัก"
+ *   "notificationToken": "...",
+ *   "newDate": "25/09/2026 13:37",
+ *   "shopName": "สาขาสยาม"
  * }
  */
 
-// ============================================================
-// LINE OAuth 2.0
-// ============================================================
+async function getMiniAppChannelAccessToken() {
+  const channelId =
+    process.env.LINE_MINIAPP_CHANNEL_ID;
 
-async function getAccessToken() {
-  const channelId = process.env.LINE_CHANNEL_ID;
-  const channelSecret = process.env.LINE_CHANNEL_SECRET;
+  const channelSecret =
+    process.env.LINE_MINIAPP_CHANNEL_SECRET;
 
   if (!channelId) {
-    throw new Error('Missing LINE_CHANNEL_ID');
+    throw new Error(
+      'Missing LINE_MINIAPP_CHANNEL_ID'
+    );
   }
 
   if (!channelSecret) {
-    throw new Error('Missing LINE_CHANNEL_SECRET');
+    throw new Error(
+      'Missing LINE_MINIAPP_CHANNEL_SECRET'
+    );
   }
 
   const response = await fetch(
@@ -34,53 +34,111 @@ async function getAccessToken() {
       method: 'POST',
 
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Type':
+          'application/x-www-form-urlencoded',
       },
 
       body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: channelId,
-        client_secret: channelSecret,
+        grant_type:
+          'client_credentials',
+
+        client_id:
+          channelId,
+
+        client_secret:
+          channelSecret,
       }),
 
-      // ป้องกัน cache
       cache: 'no-store',
     }
   );
 
-  const data = await response.json();
+  const data =
+    await response.json();
 
   if (!response.ok) {
-    console.error('LINE OAuth Error:', {
-      status: response.status,
-      statusText: response.statusText,
-      data,
-    });
+    console.error(
+      'LINE OAuth Error:',
+      {
+        status:
+          response.status,
+
+        data,
+      }
+    );
 
     throw new Error(
       data?.error_description ||
         data?.message ||
-        'LINE OAuth Failed'
+        'LINE OAuth failed'
     );
   }
 
-  if (!data?.access_token) {
-    throw new Error(
-      'LINE OAuth response does not contain access_token'
-    );
-  }
+  console.log(
+    'LINE MINI App OAuth success:',
+    {
+      tokenType:
+        data.token_type,
 
-  console.log('LINE OAuth success:', {
-    tokenType: data.token_type,
-    expiresIn: data.expires_in,
-  });
+      expiresIn:
+        data.expires_in,
+    }
+  );
 
   return data.access_token;
 }
 
-// ============================================================
-// LINE Service Message
-// ============================================================
+
+async function verifyChannelAccessToken(
+  accessToken
+) {
+  const response = await fetch(
+    'https://api.line.me/v2/oauth/verify',
+    {
+      method: 'POST',
+
+      headers: {
+        'Content-Type':
+          'application/x-www-form-urlencoded',
+      },
+
+      body: new URLSearchParams({
+        access_token:
+          accessToken,
+      }),
+
+      cache: 'no-store',
+    }
+  );
+
+  const data =
+    await response.json();
+
+  console.log(
+    'LINE Token Verify:',
+    {
+      status:
+        response.status,
+
+      clientId:
+        data?.client_id,
+
+      expiresIn:
+        data?.expires_in,
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error ||
+        data?.message ||
+        'Invalid channel access token'
+    );
+  }
+
+  return data;
+}
+
 
 async function sendServiceMessage({
   accessToken,
@@ -91,13 +149,19 @@ async function sendServiceMessage({
   const url =
     'https://api.line.me/message/v3/notifier/send?target=service';
 
-  const body = {
-    templateName: 'accepted_reminder_d_th',
+  const requestBody = {
+    templateName:
+      'accepted_reminder_d_th',
+
+    notificationToken,
 
     params: {
-      date_time: newDate,
+      date_time:
+        newDate,
 
-      shop_name: shopName || 'สาขาหลัก',
+      shop_name:
+        shopName ||
+        'สาขาหลัก',
 
       btn1_url:
         'https://miniapp.line.me/2011612068-jTYoURfr',
@@ -105,70 +169,95 @@ async function sendServiceMessage({
       btn2_url:
         'https://line.me',
     },
-
-    notificationToken,
   };
 
-  console.log('Sending LINE Service Message:', {
-    url,
-    templateName: body.templateName,
-    notificationTokenExists: Boolean(notificationToken),
-    dateTime: newDate,
-    shopName: shopName || 'สาขาหลัก',
-  });
+  console.log(
+    'Sending LINE Service Message:',
+    {
+      templateName:
+        requestBody.templateName,
 
-  const response = await fetch(url, {
-    method: 'POST',
+      notificationTokenExists:
+        Boolean(
+          requestBody.notificationToken
+        ),
 
-    headers: {
-      'Content-Type': 'application/json',
+      dateTime:
+        newDate,
 
-      Authorization: `Bearer ${accessToken}`,
-    },
+      shopName:
+        shopName ||
+        'สาขาหลัก',
+    }
+  );
 
-    body: JSON.stringify(body),
+  const response =
+    await fetch(
+      url,
+      {
+        method: 'POST',
 
-    cache: 'no-store',
-  });
+        headers: {
+          'Content-Type':
+            'application/json',
 
-  const text = await response.text();
+          Authorization:
+            `Bearer ${accessToken}`,
+        },
+
+        body: JSON.stringify(
+          requestBody
+        ),
+
+        cache: 'no-store',
+      }
+    );
+
+  const text =
+    await response.text();
 
   let result;
 
   try {
-    result = JSON.parse(text);
+    result =
+      JSON.parse(text);
   } catch {
     result = {
       raw: text,
     };
   }
 
-  if (!response.ok) {
-    console.error('LINE Service Message Error:', {
-      status: response.status,
-      statusText: response.statusText,
-      result,
-    });
+  console.log(
+    'LINE Service Message Response:',
+    {
+      status:
+        response.status,
 
+      statusText:
+        response.statusText,
+
+      result,
+    }
+  );
+
+  if (!response.ok) {
     throw new Error(
       result?.message ||
-        result?.error_description ||
-        result?.error ||
-        'LINE Service Message API Failed'
+        'LINE Service Message failed'
     );
   }
 
   return result;
 }
 
-// ============================================================
-// API Handler
-// ============================================================
 
-export default async function handler(req, res) {
-  // ----------------------------------------------------------
-  // CORS / Preflight
-  // ----------------------------------------------------------
+export default async function handler(
+  req,
+  res
+) {
+  // ==========================================================
+  // OPTIONS
+  // ==========================================================
 
   if (req.method === 'OPTIONS') {
     res.setHeader(
@@ -183,122 +272,185 @@ export default async function handler(req, res) {
 
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization'
+      'Content-Type'
     );
 
-    return res.status(200).end();
+    return res
+      .status(200)
+      .end();
   }
 
-  // ----------------------------------------------------------
-  // Method validation
-  // ----------------------------------------------------------
+
+  // ==========================================================
+  // METHOD
+  // ==========================================================
 
   if (req.method !== 'POST') {
-    return res.status(405).json({
-      success: false,
-      message: 'Method Not Allowed',
-    });
+    return res
+      .status(405)
+      .json({
+        success: false,
+        message:
+          'Method Not Allowed',
+      });
   }
 
+
   try {
-    // --------------------------------------------------------
-    // Environment validation
-    // --------------------------------------------------------
+    // ========================================================
+    // ENV CHECK
+    // ========================================================
 
-    const hasChannelId =
-      Boolean(process.env.LINE_CHANNEL_ID);
+    console.log(
+      'LINE Environment:',
+      {
+        hasMiniAppChannelId:
+          Boolean(
+            process.env
+              .LINE_MINIAPP_CHANNEL_ID
+          ),
 
-    const hasChannelSecret =
-      Boolean(process.env.LINE_CHANNEL_SECRET);
+        hasMiniAppChannelSecret:
+          Boolean(
+            process.env
+              .LINE_MINIAPP_CHANNEL_SECRET
+          ),
+      }
+    );
 
-    console.log('LINE Environment:', {
-      hasChannelId,
-      hasChannelSecret,
-    });
 
-    if (!hasChannelId || !hasChannelSecret) {
-      return res.status(500).json({
-        success: false,
-        error:
-          'LINE_CHANNEL_ID or LINE_CHANNEL_SECRET is missing',
-      });
-    }
-
-    // --------------------------------------------------------
-    // Request body
-    // --------------------------------------------------------
+    // ========================================================
+    // REQUEST
+    // ========================================================
 
     const {
-      userId,
       notificationToken,
+      userId,
       newDate,
       shopName,
-    } = req.body || {};
+    } =
+      req.body || {};
 
-    // --------------------------------------------------------
-    // Target
-    // --------------------------------------------------------
+
+    // ========================================================
+    // TARGET TOKEN
+    // ========================================================
 
     const targetToken =
-      notificationToken || userId;
+      notificationToken ||
+      userId;
 
-    // --------------------------------------------------------
-    // Validation
-    // --------------------------------------------------------
+
+    // ========================================================
+    // VALIDATION
+    // ========================================================
 
     if (!targetToken) {
-      return res.status(400).json({
-        success: false,
-        error:
-          'Missing notificationToken or userId',
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error:
+            'Missing notificationToken',
+        });
     }
 
     if (!newDate) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing newDate',
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error:
+            'Missing newDate',
+        });
     }
 
-    // --------------------------------------------------------
-    // Get OAuth Access Token
-    // --------------------------------------------------------
 
-    const accessToken = await getAccessToken();
+    // ========================================================
+    // GET MINI APP CHANNEL TOKEN
+    // ========================================================
 
-    // --------------------------------------------------------
-    // Send LINE Service Message
-    // --------------------------------------------------------
+    const accessToken =
+      await getMiniAppChannelAccessToken();
 
-    const result = await sendServiceMessage({
-      accessToken,
-      notificationToken: targetToken,
-      newDate,
-      shopName,
-    });
 
-    // --------------------------------------------------------
-    // Success
-    // --------------------------------------------------------
+    // ========================================================
+    // VERIFY TOKEN
+    // ========================================================
 
-    return res.status(200).json({
-      success: true,
+    const tokenInfo =
+      await verifyChannelAccessToken(
+        accessToken
+      );
 
-      data: result,
-    });
+
+    // ========================================================
+    // CHECK CHANNEL ID
+    // ========================================================
+
+    const configuredChannelId =
+      process.env
+        .LINE_MINIAPP_CHANNEL_ID;
+
+    if (
+      tokenInfo.client_id !==
+      configuredChannelId
+    ) {
+      throw new Error(
+        'LINE token belongs to a different channel'
+      );
+    }
+
+
+    // ========================================================
+    // SEND
+    // ========================================================
+
+    const result =
+      await sendServiceMessage({
+        accessToken,
+
+        notificationToken:
+          targetToken,
+
+        newDate,
+
+        shopName,
+      });
+
+
+    // ========================================================
+    // SUCCESS
+    // ========================================================
+
+    return res
+      .status(200)
+      .json({
+        success: true,
+
+        data:
+          result,
+      });
+
+
   } catch (error) {
-    console.error('LINE API Error:', error);
+    console.error(
+      'LINE API Error:',
+      error
+    );
 
     const message =
       error instanceof Error
         ? error.message
         : 'Unknown error';
 
-    return res.status(500).json({
-      success: false,
+    return res
+      .status(500)
+      .json({
+        success: false,
 
-      error: message,
-    });
+        error:
+          message,
+      });
   }
 }
